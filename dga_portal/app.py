@@ -797,21 +797,23 @@ def add_audit():
     return jsonify({'ok': True, 'entry': entry})
 
 
+# Pre-warm fleet in background for both gunicorn and dev server
+import threading
+def _warm_fleet():
+    import time; time.sleep(2)  # let server start first
+    print("⏳ Loading fleet data from DGADATA.xlsx (background)...")
+    _analyze_fleet()
+    if _fleet_cache:
+        print(f"✓ Fleet loaded: {_fleet_cache['total']} transformers")
+    else:
+        print("✗ Fleet data not available")
+threading.Thread(target=_warm_fleet, daemon=True).start()
+
 if __name__ == '__main__':
-    import threading
+    port = int(os.environ.get('PORT', 5050))
     print("\n" + "="*50)
     print("🔬 DGA Analysis Portal v6")
     print("="*50)
-    print("http://127.0.0.1:5050")
-    print("="*50)
-    # Pre-warm fleet cache in background (takes ~60s for 200 samples)
-    def _warm():
-        print("⏳ Loading fleet data from DGADATA.xlsx (background)...")
-        _analyze_fleet()
-        if _fleet_cache:
-            print(f"✓ Fleet loaded: {_fleet_cache['total']} transformers")
-        else:
-            print("✗ Fleet data not available")
-    threading.Thread(target=_warm, daemon=True).start()
+    print(f"http://127.0.0.1:{port}")
     print("="*50 + "\n")
-    app.run(host='127.0.0.1', port=5050, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=False)
