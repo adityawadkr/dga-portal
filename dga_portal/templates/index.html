@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>DGA Analysis Portal · Transformer Fault Intelligence</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,300;6..72,400&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js">
+// ═══ AUTO-LOAD FLEET DATA ═══
+fetch('/api/fleet').then(r=>r.json()).then(d=>{
+    if(d.error) return;
+    window._batchData = d;
+    updateDashboard(d);
+    toast(d.source+': '+d.total+' transformers loaded','success');
+    // Log to audit
+    fetch('/api/audit',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'fleet_loaded',total:d.total,source:d.source})});
+}).catch(()=>{});
+
+// ═══ MAINTENANCE RECOMMENDATIONS ═══
+function fetchRecommendations(fault, dpStatus, gases) {
+    fetch('/api/recommend',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({fault,dp_status:dpStatus,gases})})
+    .then(r=>r.json()).then(rec=>{
+        let riskColor = rec.overall_risk==='critical'?'dn':rec.overall_risk==='high'?'dn':rec.overall_risk==='medium'?'wn':'ok';
+        let recHtml = `<div class="card" style="margin-top:14px">
+            <div class="card-h"><span class="card-t">Maintenance Recommendations</span>
+            <span class="badge badge-${riskColor}">${rec.overall_risk.toUpperCase()} RISK · IEEE Cond ${rec.ieee_condition}</span></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                <div><div style="font-size:10px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Fault Actions (${rec.fault_type})</div>
+                ${rec.fault_actions.map(a=>`<div style="display:flex;gap:6px;margin-bottom:6px;font-size:12px;color:var(--fg2)"><span style="color:var(--ac);flex-shrink:0">›</span>${a}</div>`).join('')}</div>
+                <div><div style="font-size:10px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Insulation (${rec.dp_status})</div>
+                ${rec.dp_actions.map(a=>`<div style="display:flex;gap:6px;margin-bottom:6px;font-size:12px;color:var(--fg2)"><span style="color:var(--ac);flex-shrink:0">›</span>${a}</div>`).join('')}</div>
+            </div>
+            <div style="margin-top:12px;padding:10px 12px;background:var(--bg3);border-radius:var(--r-sm);font-size:11px;color:var(--fg2)">
+                <strong>TDCG:</strong> ${rec.tdcg} ppm · <strong>IEEE C57.104:</strong> Condition ${rec.ieee_condition} (${rec.ieee_desc})
+            </div></div>`;
+        
+        let el = document.getElementById('rec-panel');
+        if(!el) {
+            el = document.createElement('div'); el.id = 'rec-panel';
+            document.getElementById('rw').appendChild(el);
+        }
+        el.innerHTML = recHtml;
+    }).catch(e=>console.error('Rec error:',e));
+}
+
+// ═══ AUDIT LOGGING ═══
+function logAudit(action, data) {
+    fetch('/api/audit',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action,...data})}).catch(()=>{});
+}
+
+// Hook recommendations into renderResults
+const _origRenderResults = renderResults;
+renderResults = function(d, gases) {
+    _origRenderResults(d, gases);
+    const fault = d.consensus ? d.consensus.prediction : (d.pinn_7class ? d.pinn_7class.prediction : 'Normal');
+    const dpSt = d.dp_pinn && d.dp_pinn.health ? d.dp_pinn.health.status : 'Good';
+    fetchRecommendations(fault, dpSt, gases);
+    logAudit('single_analysis', {fault, dpSt, gases});
+};
+
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js">
+// ═══ AUTO-LOAD FLEET DATA ═══
+fetch('/api/fleet').then(r=>r.json()).then(d=>{
+    if(d.error) return;
+    window._batchData = d;
+    updateDashboard(d);
+    toast(d.source+': '+d.total+' transformers loaded','success');
+    // Log to audit
+    fetch('/api/audit',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'fleet_loaded',total:d.total,source:d.source})});
+}).catch(()=>{});
+
+// ═══ MAINTENANCE RECOMMENDATIONS ═══
+function fetchRecommendations(fault, dpStatus, gases) {
+    fetch('/api/recommend',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({fault,dp_status:dpStatus,gases})})
+    .then(r=>r.json()).then(rec=>{
+        let riskColor = rec.overall_risk==='critical'?'dn':rec.overall_risk==='high'?'dn':rec.overall_risk==='medium'?'wn':'ok';
+        let recHtml = `<div class="card" style="margin-top:14px">
+            <div class="card-h"><span class="card-t">Maintenance Recommendations</span>
+            <span class="badge badge-${riskColor}">${rec.overall_risk.toUpperCase()} RISK · IEEE Cond ${rec.ieee_condition}</span></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                <div><div style="font-size:10px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Fault Actions (${rec.fault_type})</div>
+                ${rec.fault_actions.map(a=>`<div style="display:flex;gap:6px;margin-bottom:6px;font-size:12px;color:var(--fg2)"><span style="color:var(--ac);flex-shrink:0">›</span>${a}</div>`).join('')}</div>
+                <div><div style="font-size:10px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Insulation (${rec.dp_status})</div>
+                ${rec.dp_actions.map(a=>`<div style="display:flex;gap:6px;margin-bottom:6px;font-size:12px;color:var(--fg2)"><span style="color:var(--ac);flex-shrink:0">›</span>${a}</div>`).join('')}</div>
+            </div>
+            <div style="margin-top:12px;padding:10px 12px;background:var(--bg3);border-radius:var(--r-sm);font-size:11px;color:var(--fg2)">
+                <strong>TDCG:</strong> ${rec.tdcg} ppm · <strong>IEEE C57.104:</strong> Condition ${rec.ieee_condition} (${rec.ieee_desc})
+            </div></div>`;
+        
+        let el = document.getElementById('rec-panel');
+        if(!el) {
+            el = document.createElement('div'); el.id = 'rec-panel';
+            document.getElementById('rw').appendChild(el);
+        }
+        el.innerHTML = recHtml;
+    }).catch(e=>console.error('Rec error:',e));
+}
+
+// ═══ AUDIT LOGGING ═══
+function logAudit(action, data) {
+    fetch('/api/audit',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action,...data})}).catch(()=>{});
+}
+
+// Hook recommendations into renderResults
+const _origRenderResults = renderResults;
+renderResults = function(d, gases) {
+    _origRenderResults(d, gases);
+    const fault = d.consensus ? d.consensus.prediction : (d.pinn_7class ? d.pinn_7class.prediction : 'Normal');
+    const dpSt = d.dp_pinn && d.dp_pinn.health ? d.dp_pinn.health.status : 'Good';
+    fetchRecommendations(fault, dpSt, gases);
+    logAudit('single_analysis', {fault, dpSt, gases});
+};
+
+</script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--ff:'Inter',system-ui,sans-serif;--fm:'JetBrains Mono',monospace;--fs:'Newsreader',Georgia,serif;
+--r-xs:6px;--r-sm:8px;--r-md:12px;--r-lg:16px;--ease:cubic-bezier(.2,.8,.2,1)}
+[data-theme="light"]{--bg:#FAF9F7;--bg2:#fff;--bg3:#F5F4F2;--bg4:#EEEDEB;
+--fg:#1A1A17;--fg2:#706F6C;--fg3:#A3A29F;--bd:#E8E7E5;--bd2:#D8D7D5;
+--ac:#C45828;--ac2:#B14D1E;--ac-bg:rgba(196,88,40,.06);--ac-bd:rgba(196,88,40,.15);
+--ok:#16a34a;--ok-bg:rgba(22,163,74,.06);--wn:#ca8a04;--wn-bg:rgba(202,138,4,.06);
+--dn:#dc2626;--dn-bg:rgba(220,38,38,.06);--shadow:0 1px 3px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.03)}
+[data-theme="dark"]{--bg:#1a1a1a;--bg2:#242424;--bg3:#2e2e2e;--bg4:#383838;
+--fg:#e8e6e3;--fg2:#a1a09d;--fg3:#6b6a67;--bd:#333;--bd2:#444;
+--ac:#e8743a;--ac2:#f08a54;--ac-bg:rgba(232,116,58,.08);--ac-bd:rgba(232,116,58,.2);
+--ok:#34d399;--ok-bg:rgba(52,211,153,.08);--wn:#fbbf24;--wn-bg:rgba(251,191,36,.08);
+--dn:#f87171;--dn-bg:rgba(248,113,113,.08);--shadow:0 1px 3px rgba(0,0,0,.2),0 4px 12px rgba(0,0,0,.15)}
+body{font-family:var(--ff);background:var(--bg);color:var(--fg);-webkit-font-smoothing:antialiased;min-height:100vh;transition:background .3s,color .2s}
+::selection{background:var(--ac-bg);color:var(--ac)}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:var(--fg3);border-radius:3px}
+.layout{display:flex;min-height:100vh}
+.sidebar{width:250px;position:fixed;top:0;bottom:0;left:0;z-index:50;background:var(--bg2);border-right:1px solid var(--bd);display:flex;flex-direction:column;transition:transform .3s var(--ease)}
+.sb-brand{padding:20px 16px 16px;border-bottom:1px solid var(--bd)}
+.sb-brand h1{font-size:15px;font-weight:600;display:flex;align-items:center;gap:10px}
+.sb-logo{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,var(--ac),#8B3A15);display:flex;align-items:center;justify-content:center;color:#fff;font-family:var(--fm);font-weight:700;font-size:13px}
+.sb-ver{font-size:11px;color:var(--fg3);font-family:var(--fm);margin-top:3px}
+.sb-nav{flex:1;padding:10px;overflow-y:auto}
+.sb-sec{margin-bottom:14px}
+.sb-sec-t{font-size:10px;font-weight:700;color:var(--fg3);text-transform:uppercase;letter-spacing:.08em;padding:6px 8px 4px}
+.sb-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--r-sm);font-size:13px;font-weight:450;color:var(--fg2);cursor:pointer;transition:all .15s;border:1px solid transparent;user-select:none}
+.sb-item:hover{background:var(--bg3);color:var(--fg)}
+.sb-item.active{background:var(--ac-bg);color:var(--ac);border-color:var(--ac-bd);font-weight:500}
+.sb-item svg{width:15px;height:15px;flex-shrink:0;opacity:.6}.sb-item.active svg{opacity:1}
+.sb-foot{padding:14px 16px;border-top:1px solid var(--bd);font-size:11px;color:var(--fg3)}
+.sb-dot{width:6px;height:6px;border-radius:50%;background:var(--ok);display:inline-block;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes spin{100%{transform:rotate(360deg)}}
+.sb-theme{display:flex;gap:4px;margin-top:8px}
+.sb-tbtn{flex:1;padding:5px;border-radius:var(--r-xs);border:1px solid var(--bd);background:var(--bg3);color:var(--fg2);font-size:11px;font-weight:500;cursor:pointer;font-family:var(--ff)}
+.sb-tbtn.active{background:var(--ac-bg);color:var(--ac);border-color:var(--ac-bd)}
+.main{margin-left:250px;flex:1;min-width:0}
+.main-scroll{max-width:920px;margin:0 auto;padding:36px 44px 80px}
+.hamburger{display:none;position:fixed;top:14px;left:14px;z-index:60;width:36px;height:36px;border-radius:var(--r-sm);border:1px solid var(--bd);background:var(--bg2);cursor:pointer;align-items:center;justify-content:center}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:40}
+@media(max-width:800px){.sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}.hamburger{display:flex}.overlay.open{display:block}.main{margin-left:0}.main-scroll{padding:20px 16px 60px;padding-top:56px}}
+.view{display:none}.view.active{display:block;animation:vIn .35s var(--ease)}
+@keyframes vIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.page-t{font-family:var(--fs);font-size:28px;font-weight:400;letter-spacing:-.01em;margin-bottom:4px;line-height:1.2}
+.page-d{font-size:14px;color:var(--fg2);line-height:1.55;margin-bottom:28px}
+.card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r-lg);padding:20px;box-shadow:var(--shadow);margin-bottom:14px}
+.card-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.card-t{font-size:12px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.06em}
+.badge{font-size:10px;font-weight:600;font-family:var(--fm);padding:3px 8px;border-radius:100px}
+.badge-ok{background:var(--ok-bg);color:var(--ok)}.badge-ac{background:var(--ac-bg);color:var(--ac)}
+.gas-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;margin-bottom:20px}
+.gf label{display:block;font-size:11px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
+.gf input{width:100%;padding:9px 10px;border:1px solid var(--bd);border-radius:var(--r-sm);background:var(--bg);color:var(--fg);font-family:var(--fm);font-size:13px;outline:none;transition:all .15s}
+.gf input:focus{border-color:var(--ac);box-shadow:0 0 0 3px var(--ac-bg)}
+.btn{padding:10px 20px;border-radius:var(--r-sm);border:none;font-family:var(--ff);font-size:13px;font-weight:600;cursor:pointer;transition:all .2s}
+.btn-fill{width:100%;background:var(--fg);color:var(--bg2);padding:12px}
+.btn-fill:hover{opacity:.88}.btn-fill.loading{opacity:.5;pointer-events:none}
+.btn-ghost{background:var(--bg3);color:var(--fg2);border:1px solid var(--bd);font-size:11px;padding:6px 10px}
+.upload-zone{border:2px dashed var(--bd);border-radius:var(--r-lg);padding:44px 16px;text-align:center;cursor:pointer;transition:all .25s;background:var(--bg3)}
+.upload-zone:hover,.upload-zone.dragover{border-color:var(--ac);background:var(--ac-bg)}
+.upload-icon{width:44px;height:44px;background:var(--bg2);border-radius:11px;box-shadow:var(--shadow);margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:var(--ac)}
+.upload-tt{font-weight:600;font-size:15px;margin-bottom:3px}.upload-sub{font-size:12px;color:var(--fg3)}
+.rw{display:none;margin-top:20px}.rw.active{display:block;animation:vIn .45s var(--ease)}
+.consensus{background:var(--ac-bg);border:1px solid var(--ac-bd);border-radius:var(--r-md);padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px}
+.c-fault{font-size:20px;font-weight:700;color:var(--ac)}.c-detail{font-size:12px;color:var(--fg2)}
+.stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.stat{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r-md);padding:14px}
+.stat-l{font-size:10px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
+.stat-v{font-size:22px;font-weight:600;letter-spacing:-.02em}.stat-s{font-size:11px;color:var(--fg2);margin-top:2px}
+.mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin-bottom:14px}
+.mcard{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r-md);padding:14px;transition:all .2s}
+.mcard:hover{box-shadow:var(--shadow)}
+.mcard-n{font-size:11px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+.mcard-f{font-size:16px;font-weight:600;margin-bottom:2px}.mcard-c{font-size:11px;color:var(--fg2);font-family:var(--fm)}
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.chart-card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r-md);padding:16px}
+.chart-card canvas{width:100%!important;max-height:220px}
+.chart-t{font-size:11px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px}
+.prob-row{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.prob-nm{width:38px;font-size:10px;font-weight:600;font-family:var(--fm);text-align:right;color:var(--fg3)}
+.prob-tk{flex:1;height:4px;background:var(--bg4);border-radius:100px;overflow:hidden}
+.prob-fl{height:100%;border-radius:100px;transition:width .8s var(--ease)}
+.prob-pc{width:34px;text-align:right;font-family:var(--fm);color:var(--fg3);font-size:10px}
+.duval-wrap{position:relative;width:100%;aspect-ratio:1/.866}
+.duval-wrap canvas{width:100%;height:100%}
+.duval-co{text-align:center;margin-top:5px;font-size:10px;color:var(--fg3);font-family:var(--fm)}
+.ieee-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-bottom:12px}
+.ieee-item{background:var(--bg);border:1px solid var(--bd);border-radius:var(--r-sm);padding:10px;text-align:center}
+.ieee-gas{font-size:11px;font-weight:700;color:var(--fg3);margin-bottom:4px}
+.ieee-val{font-size:16px;font-weight:600;font-family:var(--fm)}.ieee-cond{font-size:10px;font-weight:600;margin-top:3px}
+.ieee-bar{height:3px;background:var(--bg4);border-radius:100px;margin-top:5px;overflow:hidden}
+.ieee-bar-fl{height:100%;border-radius:100px;transition:width 1s var(--ease)}
+.ratio-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ratio-item{background:var(--bg);border:1px solid var(--bd);border-radius:var(--r-sm);padding:10px}
+.ratio-nm{font-size:10px;font-weight:600;color:var(--fg3);margin-bottom:3px}.ratio-val{font-size:15px;font-weight:600;font-family:var(--fm)}
+.lb-wrap{overflow-x:auto;border:1px solid var(--bd);border-radius:var(--r-md);background:var(--bg2)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead{background:var(--bg3)}
+th{padding:8px 12px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.05em;font-size:10px;text-align:left;border-bottom:1px solid var(--bd)}
+td{padding:8px 12px;border-bottom:1px solid var(--bd)}
+tr:last-child td{border-bottom:none}tr:hover td{background:var(--ac-bg)}
+.rk{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;font-family:var(--fm)}
+.rk-1{background:linear-gradient(135deg,#FFD700,#FFA500);color:#fff}.rk-2{background:linear-gradient(135deg,#C0C0C0,#A0A0A0);color:#fff}
+.rk-3{background:linear-gradient(135deg,#CD7F32,#A0522D);color:#fff}.rk-n{background:var(--bg4);color:var(--fg3)}
+.tag{display:inline-block;padding:2px 7px;border-radius:100px;font-size:10px;font-weight:600;font-family:var(--fm)}
+.tag-ok{color:var(--ok);background:var(--ok-bg)}.tag-wn{color:var(--wn);background:var(--wn-bg)}
+.tag-dn{color:var(--dn);background:var(--dn-bg)}.tag-ac{color:var(--ac);background:var(--ac-bg)}.tag-m{color:var(--fg3);background:var(--bg4)}
+.mb-bar{width:70px;height:3px;background:var(--bg4);border-radius:100px;display:inline-block;vertical-align:middle;margin-left:4px;overflow:hidden}
+.mb-fl{height:100%;border-radius:100px}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:none;align-items:center;justify-content:center}
+.modal-overlay.show{display:flex}
+.modal{background:var(--bg2);border-radius:var(--r-lg);padding:24px;max-width:700px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.modal img{width:100%;border-radius:var(--r-sm);margin-top:10px}
+.modal-close{float:right;cursor:pointer;font-size:20px;color:var(--fg3);background:none;border:none}
+.batch-wrap{display:none;margin-top:16px}.batch-wrap.active{display:block;animation:vIn .4s var(--ease)}
+.batch-sum{font-size:13px;color:var(--fg2);margin-bottom:12px}.batch-sum strong{color:var(--fg)}
+.toast{position:fixed;bottom:16px;right:16px;padding:10px 16px;border-radius:var(--r-sm);font-size:12px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.15);transform:translateY(50px);opacity:0;transition:all .35s var(--ease);z-index:100;color:#fff}
+.toast.show{transform:translateY(0);opacity:1}.toast.error{background:var(--dn)}.toast.success{background:var(--ok)}.toast.info{background:var(--ac)}
+.about-item{padding:12px;background:var(--bg);border-radius:var(--r-sm);border:1px solid var(--bd);margin-bottom:8px}
+.about-item h4{font-size:13px;font-weight:600;margin-bottom:3px}.about-item p{font-size:12px;color:var(--fg2)}
+@media(max-width:700px){.stat-row,.chart-grid,.ratio-grid{grid-template-columns:1fr}.mgrid{grid-template-columns:1fr 1fr}.gas-grid{grid-template-columns:1fr 1fr}.page-t{font-size:22px}}
+
+.dash-hero{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px}
+.dash-card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r-lg);padding:20px;position:relative;overflow:hidden;transition:all .25s var(--ease)}
+.dash-card:hover{box-shadow:var(--shadow);transform:translateY(-1px)}
+.dash-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:var(--r-lg) var(--r-lg) 0 0}
+.dash-card.card-normal::before{background:var(--ok)}.dash-card.card-crit::before{background:var(--dn)}.dash-card.card-warn::before{background:var(--wn)}
+.dash-num{font-size:32px;font-weight:700;letter-spacing:-.03em;line-height:1;margin:8px 0 4px;font-family:var(--fm)}
+.dash-label{font-size:10px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.08em}
+.dash-sub{font-size:11px;color:var(--fg3);margin-top:2px}
+.empty-state{text-align:center;padding:48px 20px;color:var(--fg3)}
+.empty-icon{width:56px;height:56px;border-radius:14px;background:var(--bg3);display:inline-flex;align-items:center;justify-content:center;margin-bottom:14px;color:var(--fg3)}
+.empty-state h4{font-size:14px;font-weight:600;color:var(--fg2);margin-bottom:4px}
+.empty-state p{font-size:12px;max-width:300px;margin:0 auto;line-height:1.5}
+.trend-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.trend-chip{padding:4px 10px;border-radius:100px;font-size:10px;font-weight:600;font-family:var(--fm);border:1px solid var(--bd);background:var(--bg3);color:var(--fg2);cursor:pointer;transition:all .15s}
+.trend-chip.active{background:var(--ac-bg);color:var(--ac);border-color:var(--ac-bd)}
+.trend-chip:hover{background:var(--bg4)}
+.roc-badge{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:100px;font-size:10px;font-weight:600;font-family:var(--fm);background:var(--dn-bg);color:var(--dn);border:1px solid rgba(220,38,38,.15);animation:pulse 2s infinite}
+.batch-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+.export-btn{display:inline-flex;align-items:center;gap:4px;padding:7px 14px;border-radius:var(--r-sm);border:1px solid var(--bd);background:var(--bg2);color:var(--fg2);font-family:var(--ff);font-size:11px;font-weight:600;cursor:pointer;transition:all .2s}
+.export-btn:hover{background:var(--ac-bg);color:var(--ac);border-color:var(--ac-bd)}
+.export-btn svg{width:13px;height:13px}
+tr.clickable{cursor:pointer;transition:background .15s}tr.clickable:hover td{background:var(--ac-bg)}
+@media(max-width:700px){.dash-hero{grid-template-columns:1fr}.trend-toolbar{flex-direction:column}}
+
+</style>
+</head>
+<body>
+<aside class="sidebar" id="sidebar">
+<div class="sb-brand"><h1><span class="sb-logo">D</span> DGA Portal</h1><div class="sb-ver">v6.0 · Fleet Intelligence</div></div>
+<nav class="sb-nav">
+<div class="sb-sec"><div class="sb-sec-t">Dashboards</div>
+<div class="sb-item active" data-view="dash-view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>Global Overview</div>
+<div class="sb-item" data-view="trend-view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Trend Analysis</div></div>
+<div class="sb-sec"><div class="sb-sec-t">Analysis</div>
+<div class="sb-item" data-view="analyze-view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Manual Input</div>
+<div class="sb-item" data-view="upload-view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Upload Data</div></div>
+<div class="sb-sec"><div class="sb-sec-t">Intelligence</div>
+<div class="sb-item" data-view="lb-view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 17V13M12 17V7M17 17V11"/></svg>Leaderboard</div></div>
+<div class="sb-sec"><div class="sb-sec-t">Reference</div>
+<div class="sb-item" data-view="about-view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>About &amp; Standards</div></div>
+</nav>
+<div class="sb-foot"><span class="sb-dot"></span> <span id="sb-st">Loading...</span>
+<div class="sb-theme"><button class="sb-tbtn active" id="btn-l" onclick="setTheme('light')">Light</button><button class="sb-tbtn" id="btn-d" onclick="setTheme('dark')">Dark</button></div></div>
+</aside>
+<button class="hamburger" id="hamburger" onclick="document.getElementById('sidebar').classList.toggle('open');document.getElementById('ov').classList.toggle('open')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+<div class="overlay" id="ov" onclick="document.getElementById('sidebar').classList.remove('open');this.classList.remove('open')"></div>
+
+<main class="main"><div class="main-scroll">
+
+
+<!-- DASHBOARD -->
+<section class="view active" id="dash-view">
+<h2 class="page-t">Global Fleet Overview</h2>
+<p class="page-d">Real-time fleet health metrics. Upload a DGA dataset to populate the dashboard with transformer diagnostics.</p>
+
+<div class="dash-hero">
+    <div class="dash-card card-normal">
+        <div class="dash-label">Total Assets</div>
+        <div class="dash-num" id="d-tot" style="color:var(--fg)">0</div>
+        <div class="dash-sub">Monitored transformers</div>
+    </div>
+    <div class="dash-card card-crit">
+        <div class="dash-label" style="color:var(--dn)">Critical Alerts</div>
+        <div class="dash-num" id="d-crit" style="color:var(--dn)">0</div>
+        <div class="dash-sub">D2 / T3 / End of Life</div>
+    </div>
+    <div class="dash-card card-warn">
+        <div class="dash-label" style="color:var(--wn)">Warnings</div>
+        <div class="dash-num" id="d-warn" style="color:var(--wn)">0</div>
+        <div class="dash-sub">D1 / PD / Thermal / Moderate DP</div>
+    </div>
+</div>
+
+<div class="card" id="d-healthy-card" style="display:none;margin-bottom:14px">
+    <div class="card-h"><span class="card-t">Fleet Health Summary</span></div>
+    <div class="chart-grid">
+        <div class="chart-card"><div class="chart-t">Fault Class Distribution</div><canvas id="dash-fault-pie" style="max-height:180px"></canvas></div>
+        <div class="chart-card"><div class="chart-t">Insulation Health</div><canvas id="dash-dp-bar" style="max-height:180px"></canvas></div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-h"><span class="card-t">Attention Required</span><span class="badge badge-dn" id="d-attn-cnt">0 Assets</span></div>
+    <div class="lb-wrap" style="border:none;box-shadow:none">
+        <table>
+            <thead><tr><th>ID / Tag</th><th>PINN</th><th>RF</th><th>Duval</th><th>DP Health</th><th>TDCG</th><th></th></tr></thead>
+            <tbody id="d-attn-tb">
+                <tr><td colspan="7"><div class="empty-state">
+                    <div class="empty-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><polyline points="13 2 13 9 20 9"/></svg></div>
+                    <h4>No fleet data yet</h4>
+                    <p>Go to <strong>Upload Data</strong> and drop a DGA dataset to populate the dashboard with transformer diagnostics.</p>
+                </div></td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+</section>
+
+<!-- TREND -->
+<section class="view" id="trend-view">
+<h2 class="page-t">Asset Trend Analysis</h2>
+<p class="page-d">Track dissolved gas evolution over time. Rate-of-change warnings highlight rapidly developing faults.</p>
+
+<div class="card">
+    <div class="card-h">
+        <span class="card-t">12-Month Gas Evolution</span>
+        <span class="roc-badge" id="trend-roc-badge" style="display:none"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span id="roc-text">High ROC</span></span>
+    </div>
+    <div class="trend-toolbar">
+        <span style="font-size:10px;color:var(--fg3);font-weight:600;text-transform:uppercase;letter-spacing:.06em">Gases:</span>
+        <span class="trend-chip active" data-gas="all" onclick="toggleTrendGas(this)">All</span>
+        <span class="trend-chip" data-gas="H2" onclick="toggleTrendGas(this)" style="border-left-color:#1d4ed8">H₂</span>
+        <span class="trend-chip" data-gas="CH4" onclick="toggleTrendGas(this)">CH₄</span>
+        <span class="trend-chip" data-gas="C2H4" onclick="toggleTrendGas(this)" style="border-left-color:#ea580c">C₂H₄</span>
+        <span class="trend-chip" data-gas="C2H2" onclick="toggleTrendGas(this)" style="border-left-color:#be123c">C₂H₂</span>
+        <span class="trend-chip" data-gas="CO" onclick="toggleTrendGas(this)">CO</span>
+    </div>
+    <div style="width:100%;height:320px;position:relative" id="trend-chart-wrap">
+        <canvas id="trend-chart"></canvas>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-h"><span class="card-t">Rate of Change Analysis</span></div>
+    <div id="roc-table-wrap">
+        <div class="empty-state" id="roc-empty">
+            <div class="empty-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+            <h4>No trend data loaded</h4>
+            <p>Click below to load a simulated 12-month transformer history with developing thermal fault.</p>
+            <button class="btn btn-fill" onclick="loadSampleTrend()" style="margin-top:16px;width:auto;display:inline-block;padding:10px 24px">Load Simulated History</button>
+        </div>
+        <div class="lb-wrap" id="roc-table" style="display:none;border:none">
+            <table><thead><tr><th>Gas</th><th>Start (ppm)</th><th>End (ppm)</th><th>Change</th><th>3-Month ROC</th><th>Status</th></tr></thead>
+            <tbody id="roc-tb"></tbody></table>
+        </div>
+    </div>
+</div>
+</section>
+
+<!-- ANALYZE -->
+<section class="view" id="analyze-view">
+<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:4px"><h2 class="page-t" style="margin-bottom:0">Fault Diagnosis</h2><button class="btn btn-ghost" onclick="exportPDF()" id="pdf-btn" style="display:none;margin-left:8px"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export PDF</button></div>
+<p class="page-d">Enter dissolved gas concentrations. Five diagnostic methods run simultaneously — three AI models and two IEEE/IEC standards.</p>
+<div class="card"><div class="card-h"><span class="card-t">Gas Concentrations (ppm)</span><button class="btn btn-ghost" onclick="fillEx()">Load Example</button></div>
+<div class="gas-grid">
+<div class="gf"><label>H&#8322;</label><input type="number" id="g-h2" placeholder="0"></div>
+<div class="gf"><label>CH&#8324;</label><input type="number" id="g-ch4" placeholder="0"></div>
+<div class="gf"><label>C&#8322;H&#8326;</label><input type="number" id="g-c2h6" placeholder="0"></div>
+<div class="gf"><label>C&#8322;H&#8324;</label><input type="number" id="g-c2h4" placeholder="0"></div>
+<div class="gf"><label>C&#8322;H&#8322;</label><input type="number" id="g-c2h2" placeholder="0"></div>
+<div class="gf"><label>CO</label><input type="number" id="g-co" placeholder="0"></div>
+<div class="gf"><label>CO&#8322;</label><input type="number" id="g-co2" placeholder="0"></div>
+</div>
+<button class="btn btn-fill" id="abtn" onclick="runAnalysis()">Run Diagnosis</button></div>
+<div class="rw" id="rw">
+<div class="consensus" id="con-card" style="display:none"><div><div style="font-size:10px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Consensus</div><div class="c-fault" id="cf">-</div></div><div class="c-detail" id="cd"></div></div>
+<div class="stat-row"><div class="stat"><div class="stat-l">PINN Classification</div><div class="stat-v" id="sp">-</div><div class="stat-s" id="sps"></div></div>
+<div class="stat"><div class="stat-l">Insulation DP</div><div class="stat-v" id="sd">-</div><div class="stat-s" id="sds"></div></div>
+<div class="stat"><div class="stat-l">Best Confidence</div><div class="stat-v" id="sc">-</div><div class="stat-s" id="scs"></div></div></div>
+<div class="mgrid" id="mgrid"></div>
+<div class="chart-grid">
+<div class="chart-card"><div class="chart-t">Gas Concentration Profile</div><canvas id="radar-chart"></canvas></div>
+<div class="chart-card"><div class="chart-t">Model Confidence</div><canvas id="conf-chart"></canvas></div>
+</div>
+<div class="chart-grid">
+<div class="chart-card"><div class="chart-t">IEEE C57.104 Threshold Status</div><div class="ieee-grid" id="ieee-grid"></div></div>
+<div class="chart-card"><div class="chart-t">Duval Triangle 1</div><div class="duval-wrap"><canvas id="duval-canvas"></canvas></div><div class="duval-co" id="duval-co"></div></div>
+</div>
+<div class="chart-grid">
+<div class="chart-card"><div class="chart-t">Class Probabilities</div><div id="r-probs"></div></div>
+<div class="chart-card"><div class="chart-t">Key Gas Ratios</div><div class="ratio-grid" id="ratio-grid"></div></div>
+</div>
+</div></section>
+
+<!-- UPLOAD -->
+<section class="view" id="upload-view">
+<h2 class="page-t">Batch Analysis</h2>
+<p class="page-d">Upload any DGA dataset (.xlsx, .csv, .tsv, .json, .txt). Column names are auto-detected from any format.</p>
+<div class="card"><div class="upload-zone" id="dz"><div class="upload-icon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
+<div class="upload-tt">Drop your file here</div><div class="upload-sub">.xlsx .csv .tsv .json .txt — auto column detection</div>
+<input type="file" id="fi" hidden accept=".xlsx,.xls,.csv,.tsv,.json,.txt"></div></div>
+<div class="batch-wrap" id="bw"><div class="batch-header"><div class="batch-sum" id="bsum"></div>
+<button class="export-btn" onclick="exportCSV()" id="csv-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export CSV</button></div>
+<div class="chart-grid" id="batch-charts" style="display:none">
+<div class="chart-card"><div class="chart-t">Fault Distribution</div><canvas id="batch-pie"></canvas></div>
+<div class="chart-card"><div class="chart-t">DP Health Distribution</div><canvas id="batch-dp-chart"></canvas></div></div>
+<div class="lb-wrap"><table><thead><tr><th>#</th><th>H2</th><th>CH4</th><th>C2H4</th><th>C2H2</th><th>PINN</th><th>RF</th><th>Duval</th><th>DP</th><th>Health</th></tr></thead><tbody id="btb"></tbody></table></div></div></section>
+
+<!-- LEADERBOARD -->
+<section class="view" id="lb-view">
+<h2 class="page-t">Model Leaderboard</h2>
+<p class="page-d">All diagnostic methods ranked on validation data. Click a model row to view its confusion matrix or results plot.</p>
+<div class="card"><div class="card-h"><span class="card-t">Fault Classification</span><span class="badge badge-ok">7 Classes</span></div>
+<div class="lb-wrap" style="border:none;box-shadow:none"><table><thead><tr><th>Rank</th><th>Model</th><th>Type</th><th>Accuracy</th><th>F1</th><th>Precision</th><th>Recall</th><th>Physics</th></tr></thead><tbody id="lb-f"></tbody></table></div></div>
+<div class="card"><div class="card-h"><span class="card-t">DP Prediction (Regression)</span><span class="badge badge-ac">Paper-Enhanced</span></div>
+<div class="lb-wrap" style="border:none;box-shadow:none"><table><thead><tr><th>Rank</th><th>Model</th><th>Type</th><th>R2</th><th>RMSE</th><th>MAE</th><th>Physics</th></tr></thead><tbody id="lb-d"></tbody></table></div></div>
+<div class="card"><div class="card-h"><span class="card-t">Feature Importance (RF v2)</span></div><img src="/static/img/rf_feature_importances.png" style="width:100%;border-radius:var(--r-sm)"></div></section>
+
+<!-- ABOUT -->
+<section class="view" id="about-view">
+<h2 class="page-t">About & Standards</h2>
+<p class="page-d">Explainable AI for transformer fault diagnosis combining physics-informed deep learning with IEEE/IEC standards.</p>
+<div class="card"><div class="card-t" style="margin-bottom:12px">Diagnostic Methods</div>
+<div class="about-item"><h4>PINN 7-Class <span class="tag tag-ok">99.8% F1</span></h4><p>Physics-Informed Neural Network with learnable gas ratio constraints. 29.7K params. Focal loss + BatchNorm.</p></div>
+<div class="about-item"><h4>Random Forest v2 <span class="tag tag-ok">98.6% F1</span></h4><p>300-tree ensemble with calibration. Trained on 2,100 synthetic samples.</p></div>
+<div class="about-item"><h4>DP PINN <span class="tag tag-ac">R2=0.86</span></h4><p>Predicts insulation DP. Physics: Chendong + Vaurchex + DePablo. 33 real paper samples.</p></div>
+<div class="about-item"><h4>Duval Triangle <span class="tag tag-m">IEEE</span></h4><p>IEC 60599 standard using %CH4, %C2H4, %C2H2 ternary plot.</p></div>
+<div class="about-item"><h4>Rogers Ratio <span class="tag tag-m">Classic</span></h4><p>Gas ratio method: C2H2/C2H4, CH4/H2, C2H4/C2H6.</p></div></div>
+<div class="card"><div class="card-t" style="margin-bottom:10px">IEEE C57.104 Fault Classes</div>
+<div class="lb-wrap" style="border:none"><table><thead><tr><th>Code</th><th>Fault</th><th>Temp</th><th>Key Gas</th></tr></thead><tbody>
+<tr><td><span class="tag tag-ok">Normal</span></td><td>No significant fault</td><td>-</td><td>-</td></tr>
+<tr><td><span class="tag tag-ac">PD</span></td><td>Partial Discharge</td><td>&lt;300C</td><td>H2</td></tr>
+<tr><td><span class="tag tag-dn">D1</span></td><td>Low-Energy Discharge</td><td>-</td><td>C2H2, H2</td></tr>
+<tr><td><span class="tag tag-dn">D2</span></td><td>High-Energy Discharge</td><td>&gt;700C</td><td>C2H2</td></tr>
+<tr><td><span class="tag tag-wn">T1</span></td><td>Thermal &lt;300C</td><td>&lt;300C</td><td>CH4</td></tr>
+<tr><td><span class="tag tag-wn">T2</span></td><td>Thermal 300-700C</td><td>300-700C</td><td>C2H4</td></tr>
+<tr><td><span class="tag tag-dn">T3</span></td><td>Thermal >700C</td><td>&gt;700C</td><td>C2H4</td></tr>
+</tbody></table></div></div></section>
+
+</div></main>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modal-ov" onclick="if(event.target===this)this.classList.remove('show')">
+<div class="modal"><button class="modal-close" onclick="document.getElementById('modal-ov').classList.remove('show')">&times;</button>
+<h3 id="modal-title" style="font-size:16px;margin-bottom:8px"></h3>
+<div id="modal-body"></div></div></div>
+<div class="toast" id="toast"></div>
+<script>
+const $=s=>document.querySelector(s),$$=s=>document.querySelectorAll(s);
+let theme=localStorage.getItem('dga-theme')||'light';setTheme(theme,true);
+let radarChart,confChart,batchPieChart,batchDpChart;
+
+$$('.sb-item').forEach(it=>{it.addEventListener('click',()=>{
+$$('.sb-item').forEach(x=>x.classList.remove('active'));$$('.view').forEach(x=>x.classList.remove('active'));
+it.classList.add('active');$('#'+it.dataset.view).classList.add('active');
+$('#sidebar').classList.remove('open');$('#ov').classList.remove('open')})});
+
+function setTheme(t,init){theme=t;document.documentElement.setAttribute('data-theme',t);localStorage.setItem('dga-theme',t);
+$('#btn-l').classList.toggle('active',t==='light');$('#btn-d').classList.toggle('active',t==='dark');
+Chart.defaults.color=t==='dark'?'#a1a09d':'#706F6C';Chart.defaults.borderColor=t==='dark'?'#333':'#E8E7E5';
+if(!init&&window._lastGases)drawDuval(window._lastGases)}
+
+fetch('/api/models').then(r=>r.json()).then(d=>{
+const n=[d.rf_v2,d.pinn_7class,d.dp_pinn].filter(Boolean).length;
+$('#sb-st').textContent=n+'/3 AI + 2 classic'}).catch(()=>{$('#sb-st').textContent='Offline'});
+
+// Leaderboard
+fetch('/api/leaderboard').then(r=>r.json()).then(d=>{
+$('#lb-f').innerHTML=d.fault_classification.map(m=>{
+const rc=m.rank<=3?'rk-'+m.rank:'rk-n';const ac=m.accuracy;const c=ac>=99?'ok':ac>=90?'wn':'dn';
+const hasImg=m.confusion_matrix?'style="cursor:pointer" onclick="showModal(\''+m.model+'\',\''+m.confusion_matrix+'\')"':'';
+return '<tr '+hasImg+'><td><span class="rk '+rc+'">'+m.rank+'</span></td><td style="font-weight:600">'+m.model+'</td>'+
+'<td><span class="tag tag-m">'+m.type+'</span></td>'+
+'<td style="font-family:var(--fm);font-weight:600;color:var(--'+c+')">'+ac.toFixed(1)+'%<span class="mb-bar"><span class="mb-fl" style="width:'+ac+'%;background:var(--'+c+')"></span></span></td>'+
+'<td style="font-family:var(--fm)">'+m.f1_macro.toFixed(1)+'%</td>'+
+'<td style="font-family:var(--fm)">'+m.precision.toFixed(1)+'%</td>'+
+'<td style="font-family:var(--fm)">'+m.recall.toFixed(1)+'%</td>'+
+'<td>'+(m.physics.startsWith("\u2713")?'<span class="tag tag-ok">'+m.physics.slice(2)+'</span>':'<span class="tag tag-m">None</span>')+'</td></tr>'}).join('');
+$('#lb-d').innerHTML=d.dp_prediction.map(m=>{
+const rc=m.rank<=3?'rk-'+m.rank:'rk-n';
+const hasImg=m.plot?'style="cursor:pointer" onclick="showModal(\''+m.model+'\',\''+m.plot+'\')"':'';
+return '<tr '+hasImg+'><td><span class="rk '+rc+'">'+m.rank+'</span></td><td style="font-weight:600">'+m.model+'</td>'+
+'<td><span class="tag tag-m">'+m.type+'</span></td>'+
+'<td style="font-family:var(--fm);font-weight:600;color:'+(m.r2>=80?'var(--ok)':'var(--wn)')+'">'+m.r2.toFixed(1)+'%</td>'+
+'<td style="font-family:var(--fm)">'+m.rmse.toFixed(1)+'</td><td style="font-family:var(--fm)">'+m.mae.toFixed(1)+'</td>'+
+'<td>'+(m.physics.startsWith("\u2713")?'<span class="tag tag-ok">'+m.physics.slice(2)+'</span>':'<span class="tag tag-m">None</span>')+'</td></tr>'}).join('')
+}).catch(e=>console.error(e));
+
+function showModal(title,imgSrc){$('#modal-title').textContent=title+' — Results';
+$('#modal-body').innerHTML='<img src="'+imgSrc+'" alt="'+title+'">';$('#modal-ov').classList.add('show')}
+
+function fillEx(){const e={H2:250,CH4:80,C2H6:35,C2H4:120,C2H2:200,CO:350,CO2:2500};
+Object.entries(e).forEach(([k,v])=>{const el=$('#g-'+k.toLowerCase());if(el)el.value=v})}
+
+// Upload
+const dz=$('#dz'),fi=$('#fi');
+dz.addEventListener('click',()=>fi.click());
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover')});
+dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');if(e.dataTransfer.files[0])doUpload(e.dataTransfer.files[0])});
+fi.addEventListener('change',e=>{if(e.target.files[0])doUpload(e.target.files[0])});
+
+async function doUpload(file){
+toast('Uploading '+file.name+'...','info');
+const fd=new FormData();fd.append('file',file);
+const origHtml=dz.innerHTML;
+dz.innerHTML='<div class="upload-icon"><svg viewBox="0 0 50 50" style="width:24px;height:24px;animation:spin 1s linear infinite"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="5" stroke-dasharray="31.4 150" stroke-linecap="round"></circle></svg></div><div class="upload-tt">Processing...</div><div class="upload-sub">Analyzing '+file.name+'</div>';
+dz.style.pointerEvents='none';
+try{const r=await fetch('/api/upload',{method:'POST',body:fd});const d=await r.json();
+dz.innerHTML=origHtml;dz.style.pointerEvents='auto';
+if(d.error){toast(d.error,'error');return}renderBatch(d);toast('Analyzed '+d.total+' samples','success')}
+catch(e){dz.innerHTML=origHtml;dz.style.pointerEvents='auto';toast(e.message,'error')}}
+
+function runAnalysis(){const btn=$('#abtn');btn.classList.add('loading');btn.textContent='Analyzing...';
+const gases={H2:+$('#g-h2').value||0,CH4:+$('#g-ch4').value||0,C2H6:+$('#g-c2h6').value||0,
+C2H4:+$('#g-c2h4').value||0,C2H2:+$('#g-c2h2').value||0,CO:+$('#g-co').value||0,CO2:+$('#g-co2').value||0};
+fetch('/api/predict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({gases})})
+.then(r=>r.json()).then(d=>{btn.classList.remove('loading');btn.textContent='Run Diagnosis';
+if(d.error){toast(d.error,'error');return}renderResults(d,gases)})
+.catch(e=>{btn.classList.remove('loading');btn.textContent='Run Diagnosis';toast(e.message,'error')})}
+
+function renderResults(d,gases){
+const w=$('#rw');w.classList.add('active');w.scrollIntoView({behavior:'smooth',block:'start'});
+const pinn=d.pinn_7class,rf=d.rf_v2,dp=d.dp_pinn;
+if(d.consensus){$('#con-card').style.display='flex';$('#cf').textContent=d.consensus.prediction;
+$('#cf').style.color=fc(d.consensus.prediction);$('#cd').textContent=d.consensus.agreement+' methods agree'}
+if(pinn){$('#sp').textContent=pinn.prediction;$('#sp').style.color=fc(pinn.prediction);$('#sps').textContent=pinn.confidence+'% · '+pinn.latency_ms+'ms'}
+if(dp){$('#sd').textContent=dp.dp_predicted;$('#sd').style.color=dp.health.level==='success'?'var(--ok)':dp.health.level==='warning'?'var(--wn)':'var(--dn)';$('#sds').textContent=dp.health.status+' · Physics: '+dp.dp_physics}
+const conf=pinn?pinn.confidence:rf?rf.confidence:0;
+$('#sc').textContent=conf.toFixed(1)+'%';$('#sc').style.color=conf>90?'var(--ok)':conf>70?'var(--wn)':'var(--dn)';
+if(rf)$('#scs').textContent='RF: '+rf.confidence+'%';
+
+// Model cards
+const methods=[{k:'pinn_7class',n:'PINN 7-Class',i:'brain',d:pinn},{k:'rf_v2',n:'RF v2',i:'trees',d:rf},
+{k:'duval',n:'Duval Triangle',i:'triangle',d:d.duval},{k:'rogers',n:'Rogers Ratio',i:'ratio',d:d.rogers},{k:'iec',n:'IEC 60599',i:'standard',d:d.iec}];
+$('#mgrid').innerHTML=methods.filter(m=>m.d).map(m=>{
+const pred=m.d.prediction;const cs=m.d.confidence?m.d.confidence+'%':'Rule-based';
+const lat=m.d.latency_ms?m.d.latency_ms+'ms':'';
+return '<div class="mcard"><div class="mcard-n">'+m.n+'</div><div class="mcard-f" style="color:'+fc(pred)+'">'+pred+'</div><div class="mcard-c">'+cs+(lat?' · '+lat:'')+'</div></div>'}).join('');
+
+// Radar chart
+const gasVals=Object.values(gases);const gasKeys=Object.keys(gases);
+if(radarChart)radarChart.destroy();
+radarChart=new Chart($('#radar-chart'),{type:'radar',data:{labels:gasKeys,datasets:[{label:'ppm',data:gasVals,
+borderColor:'rgba(196,88,40,0.8)',backgroundColor:'rgba(196,88,40,0.15)',pointRadius:3,pointBackgroundColor:'var(--ac)'}]},
+options:{responsive:true,plugins:{legend:{display:false}},scales:{r:{beginAtZero:true,grid:{color:theme==='dark'?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.05)'},
+ticks:{font:{size:9,family:"JetBrains Mono"},backdropColor:'transparent'}}}}});
+
+// Confidence comparison
+const confData=[pinn?pinn.confidence:0,rf?rf.confidence:0].filter(x=>x>0);
+const confLabels=[pinn?'PINN':'',rf?'RF':''].filter(x=>x);
+if(confChart)confChart.destroy();
+confChart=new Chart($('#conf-chart'),{type:'bar',data:{labels:confLabels,datasets:[{data:confData,
+backgroundColor:['rgba(196,88,40,0.7)','rgba(22,163,74,0.7)'],borderRadius:6,barPercentage:0.5}]},
+options:{responsive:true,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{min:0,max:100,grid:{color:theme==='dark'?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.05)'},
+ticks:{font:{size:10,family:"JetBrains Mono"},callback:v=>v+'%'}},y:{grid:{display:false},ticks:{font:{size:11,family:"Inter",weight:600}}}}}});
+
+// IEEE thresholds
+if(d.ieee_status){$('#ieee-grid').innerHTML=Object.entries(d.ieee_status).map(([gas,info])=>{
+const cond=info.condition;const c=cond<=1?'ok':cond<=2?'wn':cond<=3?'dn':'dn';
+const pct=Math.min(info.value/info.limits.condition4*100,100);
+return '<div class="ieee-item"><div class="ieee-gas">'+gas+'</div><div class="ieee-val" style="color:var(--'+c+')">'+info.value+'</div>'+
+'<div class="ieee-cond" style="color:var(--'+c+')">Cond '+cond+'</div>'+
+'<div class="ieee-bar"><div class="ieee-bar-fl" style="width:'+pct+'%;background:var(--'+c+')"></div></div></div>'}).join('')}
+
+// Probabilities
+const probs=pinn?pinn.probabilities:rf?rf.probabilities:{};
+$('#r-probs').innerHTML=Object.entries(probs).sort((a,b)=>b[1]-a[1]).map(([c,p])=>{
+const pct=(p*100).toFixed(1);return '<div class="prob-row"><span class="prob-nm">'+c+'</span><div class="prob-tk"><div class="prob-fl" style="width:'+pct+'%;background:'+fc(c)+'"></div></div><span class="prob-pc">'+pct+'%</span></div>'}).join('');
+
+// Ratios
+if(d.ratios){$('#ratio-grid').innerHTML=Object.entries(d.ratios).map(([k,v])=>{
+return '<div class="ratio-item"><div class="ratio-nm">'+k.replace(/_/g,'/')+'</div><div class="ratio-val">'+v+'</div></div>'}).join('')}
+
+drawDuval(gases);window._lastGases=gases}
+
+function renderBatch(data){
+const w=$('#bw');w.classList.add('active');w.scrollIntoView({behavior:'smooth'});
+const cols=data.columns_detected?Object.entries(data.columns_detected).map(([k,v])=>k+'='+v).join(', '):'';
+$('#bsum').innerHTML='<strong>'+data.total+'</strong> samples · 5 methods · Columns: '+cols;
+
+// Fault distribution pie
+if(data.fault_distribution&&Object.keys(data.fault_distribution).length>0){
+$('#batch-charts').style.display='grid';
+const fLabels=Object.keys(data.fault_distribution);const fVals=Object.values(data.fault_distribution);
+const fColors=fLabels.map(f=>fc(f).replace('var(--ok)','#16a34a').replace('var(--dn)','#dc2626').replace('var(--wn)','#ca8a04').replace('var(--ac)','#C45828'));
+if(batchPieChart)batchPieChart.destroy();
+batchPieChart=new Chart($('#batch-pie'),{type:'doughnut',data:{labels:fLabels,datasets:[{data:fVals,backgroundColor:['#C45828','#16a34a','#dc2626','#ca8a04','#6366f1','#DB2777','#059669'],borderWidth:0}]},
+options:{responsive:true,plugins:{legend:{position:'right',labels:{font:{size:11}}}}}});
+
+// DP distribution
+const dpBuckets={Excellent:0,Good:0,Moderate:0,Critical:0,'End of Life':0};
+data.samples.forEach(s=>{if(s.dp_pinn&&s.dp_pinn.health)dpBuckets[s.dp_pinn.health.status]=(dpBuckets[s.dp_pinn.health.status]||0)+1});
+if(batchDpChart)batchDpChart.destroy();
+batchDpChart=new Chart($('#batch-dp-chart'),{type:'bar',data:{labels:Object.keys(dpBuckets),datasets:[{data:Object.values(dpBuckets),
+backgroundColor:['#16a34a','#059669','#ca8a04','#dc2626','#7f1d1d'],borderRadius:4}]},
+options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true},x:{grid:{display:false}}}}})}
+
+window._batchData = data;
+$('#btb').innerHTML=data.samples.map((s,i)=>{
+const g=s.gases,p7=s.pinn_7class||{},rf=s.rf_v2||{},dp=s.dp_pinn||{},h=dp.health||{};
+return '<tr style="cursor:pointer" title="Click to view detailed infographics" onclick="window.viewRow('+i+')"><td style="font-family:var(--fm);color:var(--fg3)">'+(i+1)+'</td>'+
+'<td style="font-family:var(--fm)">'+g.H2.toFixed(0)+'</td><td style="font-family:var(--fm)">'+g.CH4.toFixed(0)+'</td>'+
+'<td style="font-family:var(--fm)">'+g.C2H4.toFixed(0)+'</td><td style="font-family:var(--fm)">'+g.C2H2.toFixed(0)+'</td>'+
+'<td><span class="tag '+tc(p7.prediction)+'">'+(p7.prediction||'-')+'</span></td>'+
+'<td><span class="tag '+tc(rf.prediction)+'">'+(rf.prediction||'-')+'</span></td>'+
+'<td><span class="tag '+tc(s.duval)+'">'+(s.duval||'-')+'</span></td>'+
+'<td style="font-family:var(--fm);font-weight:600">'+(dp.dp||'-')+'</td>'+
+'<td><span class="tag '+(h.level==='success'?'tag-ok':h.level==='warning'?'tag-wn':'tag-dn')+'">'+(h.status||'-')+'</span></td></tr>'}).join('')}
+
+window.viewRow = function(i) {
+    const s = window._batchData.samples[i];
+    Object.entries(s.gases).forEach(([k,v])=>{const el=$('#g-'+k.toLowerCase());if(el)el.value=v});
+    $$('.sb-item')[0].click();
+    runAnalysis();
+    toast('Processing analytics for sample '+(i+1),'info');
+};
+
+function drawDuval(gases){
+const canvas=$('#duval-canvas'),ctx=canvas.getContext('2d');
+const dpr=window.devicePixelRatio||1,rect=canvas.parentElement.getBoundingClientRect();
+canvas.width=rect.width*dpr;canvas.height=rect.height*dpr;canvas.style.width=rect.width+'px';canvas.style.height=rect.height+'px';ctx.scale(dpr,dpr);
+const w=rect.width,h=rect.height,sum=(gases.CH4||0)+(gases.C2H4||0)+(gases.C2H2||0);if(sum===0)return;
+const ch4=gases.CH4/sum*100,c2h4=gases.C2H4/sum*100,c2h2=gases.C2H2/sum*100;const dk=theme==='dark';
+const top={x:w/2,y:14},lt={x:14,y:h-14},rt={x:w-14,y:h-14};ctx.clearRect(0,0,w,h);
+function bary(a,b,c){return{x:top.x*(a/100)+lt.x*(b/100)+rt.x*(c/100),y:top.y*(a/100)+lt.y*(b/100)+rt.y*(c/100)}}
+const zones=[{n:'PD',c:dk?'rgba(232,116,58,.08)':'rgba(196,88,40,.04)',v:[[98,1,1],[87,4,9],[87,13,0]]},
+{n:'T1',c:dk?'rgba(52,211,153,.07)':'rgba(22,163,74,.03)',v:[[87,13,0],[87,4,9],[50,50,0],[76,20,4]]},
+{n:'T2',c:dk?'rgba(251,191,36,.07)':'rgba(202,138,4,.04)',v:[[50,50,0],[76,20,4],[46,50,4]]},
+{n:'T3',c:dk?'rgba(248,113,113,.08)':'rgba(220,38,38,.04)',v:[[0,100,0],[50,50,0],[46,50,4],[0,85,15]]},
+{n:'D1',c:dk?'rgba(244,114,182,.07)':'rgba(219,39,119,.03)',v:[[87,4,9],[40,31,29],[23,0,77],[0,0,100],[0,85,15],[46,50,4],[76,20,4]]},
+{n:'D2',c:dk?'rgba(248,113,113,.1)':'rgba(220,38,38,.05)',v:[[23,0,77],[0,0,100],[40,31,29]]}];
+zones.forEach(z=>{ctx.beginPath();const p0=bary(...z.v[0]);ctx.moveTo(p0.x,p0.y);z.v.slice(1).forEach(v=>{const p=bary(...v);ctx.lineTo(p.x,p.y)});ctx.closePath();ctx.fillStyle=z.c;ctx.fill()});
+ctx.beginPath();ctx.moveTo(top.x,top.y);ctx.lineTo(lt.x,lt.y);ctx.lineTo(rt.x,rt.y);ctx.closePath();ctx.strokeStyle=dk?'rgba(255,255,255,.1)':'rgba(0,0,0,.08)';ctx.lineWidth=1;ctx.stroke();
+ctx.font='600 9px Inter';ctx.fillStyle=dk?'rgba(255,255,255,.2)':'rgba(0,0,0,.15)';ctx.textAlign='center';
+[{t:'PD',p:[90,6,4]},{t:'T1',p:[70,25,5]},{t:'T2',p:[55,42,3]},{t:'T3',p:[20,75,5]},{t:'D1',p:[40,20,40]},{t:'D2',p:[10,10,80]}].forEach(z=>{const p=bary(...z.p);ctx.fillText(z.t,p.x,p.y)});
+ctx.font='600 10px JetBrains Mono';ctx.fillStyle=dk?'rgba(255,255,255,.35)':'rgba(0,0,0,.3)';
+ctx.textAlign='center';ctx.fillText('CH4',top.x,top.y-4);ctx.textAlign='right';ctx.fillText('C2H4',lt.x-3,lt.y+3);ctx.textAlign='left';ctx.fillText('C2H2',rt.x+3,rt.y+3);
+const pt=bary(ch4,c2h4,c2h2);ctx.beginPath();ctx.arc(pt.x,pt.y,10,0,Math.PI*2);ctx.fillStyle=dk?'rgba(232,116,58,.12)':'rgba(196,88,40,.1)';ctx.fill();
+ctx.beginPath();ctx.arc(pt.x,pt.y,4,0,Math.PI*2);ctx.fillStyle='var(--ac)';ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
+$('#duval-co').textContent='%CH4: '+ch4.toFixed(1)+' | %C2H4: '+c2h4.toFixed(1)+' | %C2H2: '+c2h2.toFixed(1)}
+
+function fc(f){if(!f)return'var(--fg)';f=f.toUpperCase();if(f.includes('D2'))return'var(--dn)';if(f.includes('D1'))return'#DB2777';
+if(f.includes('T3'))return'var(--dn)';if(f.includes('T2'))return'var(--wn)';if(f.includes('T1'))return'var(--ok)';
+if(f==='PD')return'var(--ac)';if(f==='NORMAL')return'var(--ok)';return'var(--fg)'}
+function tc(f){if(!f)return'tag-m';f=f.toUpperCase();if(f.includes('D'))return'tag-dn';if(f.includes('T'))return'tag-wn';
+if(f==='PD')return'tag-ac';if(f==='NORMAL')return'tag-ok';return'tag-m'}
+function toast(m,t='error'){const el=$('#toast');el.textContent=m;el.className='toast '+t;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3500)}
+
+// ═══ AUTO-LOAD FLEET DATA ═══
+fetch('/api/fleet').then(r=>r.json()).then(d=>{
+    if(d.error) return;
+    window._batchData = d;
+    updateDashboard(d);
+    toast(d.source+': '+d.total+' transformers loaded','success');
+    // Log to audit
+    fetch('/api/audit',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'fleet_loaded',total:d.total,source:d.source})});
+}).catch(()=>{});
+
+// ═══ MAINTENANCE RECOMMENDATIONS ═══
+function fetchRecommendations(fault, dpStatus, gases) {
+    fetch('/api/recommend',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({fault,dp_status:dpStatus,gases})})
+    .then(r=>r.json()).then(rec=>{
+        let riskColor = rec.overall_risk==='critical'?'dn':rec.overall_risk==='high'?'dn':rec.overall_risk==='medium'?'wn':'ok';
+        let recHtml = `<div class="card" style="margin-top:14px">
+            <div class="card-h"><span class="card-t">Maintenance Recommendations</span>
+            <span class="badge badge-${riskColor}">${rec.overall_risk.toUpperCase()} RISK · IEEE Cond ${rec.ieee_condition}</span></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                <div><div style="font-size:10px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Fault Actions (${rec.fault_type})</div>
+                ${rec.fault_actions.map(a=>`<div style="display:flex;gap:6px;margin-bottom:6px;font-size:12px;color:var(--fg2)"><span style="color:var(--ac);flex-shrink:0">›</span>${a}</div>`).join('')}</div>
+                <div><div style="font-size:10px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Insulation (${rec.dp_status})</div>
+                ${rec.dp_actions.map(a=>`<div style="display:flex;gap:6px;margin-bottom:6px;font-size:12px;color:var(--fg2)"><span style="color:var(--ac);flex-shrink:0">›</span>${a}</div>`).join('')}</div>
+            </div>
+            <div style="margin-top:12px;padding:10px 12px;background:var(--bg3);border-radius:var(--r-sm);font-size:11px;color:var(--fg2)">
+                <strong>TDCG:</strong> ${rec.tdcg} ppm · <strong>IEEE C57.104:</strong> Condition ${rec.ieee_condition} (${rec.ieee_desc})
+            </div></div>`;
+        
+        let el = document.getElementById('rec-panel');
+        if(!el) {
+            el = document.createElement('div'); el.id = 'rec-panel';
+            document.getElementById('rw').appendChild(el);
+        }
+        el.innerHTML = recHtml;
+    }).catch(e=>console.error('Rec error:',e));
+}
+
+// ═══ AUDIT LOGGING ═══
+function logAudit(action, data) {
+    fetch('/api/audit',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action,...data})}).catch(()=>{});
+}
+
+// Hook recommendations into renderResults
+const _origRenderResults = renderResults;
+renderResults = function(d, gases) {
+    _origRenderResults(d, gases);
+    const fault = d.consensus ? d.consensus.prediction : (d.pinn_7class ? d.pinn_7class.prediction : 'Normal');
+    const dpSt = d.dp_pinn && d.dp_pinn.health ? d.dp_pinn.health.status : 'Good';
+    fetchRecommendations(fault, dpSt, gases);
+    logAudit('single_analysis', {fault, dpSt, gases});
+};
+
+</script></body></html>
